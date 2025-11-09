@@ -28,7 +28,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
 
 // Health check
-app.get("/api/health", (req, res) => {
+app.get("/api/health", (req: express.Request, res: express.Response) => {
   res.json({ status: "Backend is running" });
 });
 

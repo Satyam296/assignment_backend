@@ -14,18 +14,18 @@
     "license": "ISC",
     "description": "EMI Products Backend API",
     "dependencies": {
+        "@types/cors": "^2.8.14",
+        "@types/express": "^4.17.17",
+        "@types/node": "^20.5.0",
         "@types/nodemailer": "^7.0.3",
         "cors": "^2.8.5",
         "dotenv": "^16.3.1",
         "express": "^4.18.2",
         "mongoose": "^7.5.0",
-        "nodemailer": "^7.0.10"
+        "nodemailer": "^7.0.10",
+        "typescript": "^5.2.2"
     },
     "devDependencies": {
-        "@types/cors": "^2.8.14",
-        "@types/express": "^4.17.17",
-        "@types/node": "^20.5.0",
-        "ts-node": "^10.9.1",
-        "typescript": "^5.2.2"
+        "ts-node": "^10.9.1"
     }
 }
