@@ -1,5 +1,3 @@
-import mongoose, { Schema, Document } from "mongoose";
-
 export interface IVariant {
   id: string;
   name: string;
@@ -8,9 +6,8 @@ export interface IVariant {
   price: number;
   mrp: number;
   image: string;
-  images?: string[]; // Multiple images for different angles/positions
-  stock?: number; // Inventory count
-  availableEmiPlans?: string[]; // Array of EMI plan IDs available for this variant
+  images?: string[];
+  stock?: number;
 }
 
 export interface IEMIPlan {
@@ -33,64 +30,16 @@ export interface IDownpaymentOption {
   label: string;
 }
 
-export interface IProduct extends Document {
+export interface IProduct {
+  id?: string;
   slug: string;
   name: string;
   category: string;
   description: string;
   variants: IVariant[];
-  emiPlans: IEMIPlan[];
+  emi_plans: IEMIPlan[];
   specifications?: ISpecification[];
-  downpaymentOptions?: IDownpaymentOption[];
-  createdAt: Date;
-  updatedAt: Date;
+  downpayment_options?: IDownpaymentOption[];
+  created_at?: string;
+  updated_at?: string;
 }
-
-const VariantSchema = new Schema({
-  id: String,
-  name: String,
-  color: String,
-  storage: String,
-  price: Number,
-  mrp: Number,
-  image: String,
-  images: [String], // Array of image URLs
-  stock: { type: Number, default: 10 }, // Default stock 10 units
-  availableEmiPlans: [String], // Array of EMI plan IDs available for this variant
-});
-
-const EMIPlanSchema = new Schema({
-  id: String,
-  tenure: Number,
-  monthlyPayment: Number,
-  interestRate: Number,
-  cashback: Number,
-  mutualFundName: String,
-});
-
-const SpecificationSchema = new Schema({
-  key: String,
-  value: String,
-});
-
-const DownpaymentOptionSchema = new Schema({
-  id: String,
-  amount: Number,
-  label: String,
-});
-
-const ProductSchema = new Schema(
-  {
-    slug: { type: String, unique: true, required: true, lowercase: true },
-    name: { type: String, required: true },
-    category: { type: String, required: true },
-    description: { type: String, required: true },
-    variants: [VariantSchema],
-    emiPlans: [EMIPlanSchema],
-    specifications: [SpecificationSchema],
-    downpaymentOptions: [DownpaymentOptionSchema],
-  },
-  { timestamps: true }
-);
-
-export default mongoose.model<IProduct>("Product", ProductSchema);
