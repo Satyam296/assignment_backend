@@ -1,50 +1,61 @@
-import mongoose from "mongoose";
-import dotenv from "dotenv";
-import Admin from "./src/models/Admin";
+import { createClient } from '@supabase/supabase-js';
+import * as dotenv from 'dotenv';
+import bcrypt from 'bcrypt';
 
 dotenv.config();
 
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/emi-products";
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 const setupAdmin = async () => {
   try {
-    await mongoose.connect(MONGODB_URI);
-    console.log("Connected to MongoDB");
+    console.log('👤 Setting up admin account...');
 
-    // Check if admin already exists
-    const existingAdmin = await Admin.findOne({ email: "satyamchhetri629@gmail.com" });
+    const email = 'satyamchhetri629@gmail.com';
+    const password = 'admin123';
+
+    // Check if admin exists
+    const { data: existingAdmin } = await supabase
+      .from('admins')
+      .select('id, email')
+      .eq('email', email)
+      .single();
     
     if (existingAdmin) {
-      console.log("Admin user already exists!");
-      console.log("Email:", existingAdmin.email);
-      console.log("Notifications enabled:", existingAdmin.notificationEnabled);
-      console.log("Low stock threshold:", existingAdmin.lowStockThreshold);
+      console.log("✅ Admin user already exists!");
+      console.log("📧 Email:", email);
+      console.log("🔑 Password: admin123");
       process.exit(0);
     }
 
-    // Create default admin
-    const admin = new Admin({
-      email: "satyamchhetri629@gmail.com",
-      password: "admin123", // In production, this should be hashed!
-      name: "Satyam",
-      notificationEnabled: true,
-      lowStockThreshold: 5,
-    });
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    await admin.save();
-    
+    // Insert admin
+    const { data: admin, error } = await supabase
+      .from('admins')
+      .insert({
+        email,
+        password: hashedPassword,
+        name: 'Admin'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
     console.log("✅ Admin user created successfully!");
     console.log("====================================");
-    console.log("Email: admin@example.com");
-    console.log("Password: admin123");
-    console.log("Low Stock Threshold: 5 units");
+    console.log("📧 Email:", email);
+    console.log("🔑 Password: admin123");
     console.log("====================================");
     console.log("⚠️  IMPORTANT: Change the password in production!");
-    console.log("Update your email in the admin dashboard to receive notifications.");
 
     process.exit(0);
-  } catch (error) {
-    console.error("Error setting up admin:", error);
+  } catch (error: any) {
+    console.error("❌ Error setting up admin:", error.message);
     process.exit(1);
   }
 };

@@ -10,6 +10,7 @@ export interface IVariant {
   image: string;
   images?: string[]; // Multiple images for different angles/positions
   stock?: number; // Inventory count
+  availableEmiPlans?: string[]; // Array of EMI plan IDs available for this variant
 }
 
 export interface IEMIPlan {
@@ -55,6 +56,7 @@ const VariantSchema = new Schema({
   image: String,
   images: [String], // Array of image URLs
   stock: { type: Number, default: 10 }, // Default stock 10 units
+  availableEmiPlans: [String], // Array of EMI plan IDs available for this variant
 });
 
 const EMIPlanSchema = new Schema({
