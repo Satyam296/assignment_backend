@@ -1,7 +1,5 @@
 import { Request, Response } from "express";
-import Order from "../models/Order";
-import Product from "../models/Product";
-import Admin from "../models/Admin";
+import { supabase } from "../config/supabase";
 import { sendLowStockAlert } from "../services/emailService";
 
 export const createOrder = async (req: Request, res: Response) => {
@@ -28,99 +26,141 @@ export const createOrder = async (req: Request, res: Response) => {
       });
     }
 
-    // Find the product and decrement stock
-    const product = await Product.findById(orderData.productId);
-    if (!product) {
+    // Find the product
+    const { data: product, error: productError } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', orderData.productId)
+      .single();
+
+    if (productError || !product) {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // Find the variant - check both id and _id fields
-    const variant = product.variants.find(v => 
-      v.id === orderData.variantId || 
-      (v as any)._id?.toString() === orderData.variantId
-    );
-    if (!variant) {
+    // Find the variant in the JSON field
+    const variants = product.variants || [];
+    const variantIndex = variants.findIndex((v: any) => v.id === orderData.variantId);
+    
+    if (variantIndex === -1) {
       return res.status(404).json({ error: "Variant not found" });
     }
+
+    const variant = variants[variantIndex];
 
     // Check if variant has stock
     if ((variant.stock || 0) === 0) {
       return res.status(400).json({ error: "Product is out of stock" });
     }
 
-    // Store old stock for notification check
     const oldStock = variant.stock || 0;
 
     // Decrement stock
-    variant.stock = (variant.stock || 0) - 1;
-    await product.save();
+    variants[variantIndex] = {
+      ...variant,
+      stock: (variant.stock || 0) - 1
+    };
 
-    // Check if stock dropped below threshold and send alert
-    const admins = await Admin.find({ notificationEnabled: true });
-    const newStock = variant.stock;
+    // Update product with new stock
+    const { error: updateError } = await supabase
+      .from('products')
+      .update({ variants: variants })
+      .eq('id', orderData.productId);
+
+    if (updateError) {
+      console.error('Error updating stock:', updateError);
+      throw updateError;
+    }
+
+    // Create order
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert([{
+        product_id: orderData.productId,
+        product_name: orderData.productName,
+        variant_id: orderData.variantId,
+        variant_color: orderData.variantColor,
+        variant_storage: orderData.variantStorage,
+        variant_price: orderData.variantPrice,
+        emi_plan_id: orderData.emiPlanId,
+        emi_tenure: orderData.emiTenure,
+        monthly_payment: orderData.monthlyPayment,
+        interest_rate: orderData.interestRate || 0,
+        cashback: orderData.cashback || 0,
+        total_amount: orderData.emiTenure * orderData.monthlyPayment,
+      }])
+      .select()
+      .single();
+
+    if (orderError) {
+      console.error('Error creating order:', orderError);
+      throw orderError;
+    }
+
+    // Check for low stock alerts
+    const newStock = variants[variantIndex].stock;
+    const { data: admins } = await supabase
+      .from('admins')
+      .select('*')
+      .eq('notification_enabled', true);
     
-    for (const admin of admins) {
-      if (newStock < admin.lowStockThreshold && newStock >= 0) {
-        await sendLowStockAlert(
-          admin.email,
-          product.name,
-          variant.name,
-          newStock,
-          admin.lowStockThreshold
-        );
+    if (admins && admins.length > 0) {
+      for (const admin of admins) {
+        if (newStock < admin.low_stock_threshold && newStock >= 0) {
+          await sendLowStockAlert(
+            admin.email,
+            product.name,
+            variant.name,
+            newStock,
+            admin.low_stock_threshold
+          );
+        }
       }
     }
 
-    // Create new order
-    const order = new Order({
-      productId: orderData.productId,
-      productName: orderData.productName,
-      variantId: orderData.variantId,
-      variantColor: orderData.variantColor,
-      variantStorage: orderData.variantStorage,
-      variantPrice: orderData.variantPrice,
-      emiPlanId: orderData.emiPlanId,
-      emiTenure: orderData.emiTenure,
-      monthlyPayment: orderData.monthlyPayment,
-      interestRate: orderData.interestRate,
-      cashback: orderData.cashback || 0,
-      totalAmount: orderData.emiTenure * orderData.monthlyPayment,
-    });
-
-    const savedOrder = await order.save();
     res.status(201).json({
       message: "Order created successfully",
-      order: savedOrder,
-      stockRemaining: variant.stock,
+      order,
+      stockRemaining: newStock,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating order:", error);
-    res.status(500).json({ error: "Failed to create order" });
+    res.status(500).json({ error: "Failed to create order", details: error.message });
   }
 };
 
 export const getAllOrders = async (req: Request, res: Response) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 });
-    res.json(orders);
-  } catch (error) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error: any) {
     console.error("Error fetching orders:", error);
-    res.status(500).json({ error: "Failed to fetch orders" });
+    res.status(500).json({ error: "Failed to fetch orders", details: error.message });
   }
 };
 
 export const getOrderById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const order = await Order.findById(id);
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .single();
     
-    if (!order) {
+    if (error) throw error;
+    
+    if (!data) {
       return res.status(404).json({ error: "Order not found" });
     }
     
-    res.json(order);
-  } catch (error) {
+    res.json(data);
+  } catch (error: any) {
     console.error("Error fetching order:", error);
-    res.status(500).json({ error: "Failed to fetch order" });
+    res.status(500).json({ error: "Failed to fetch order", details: error.message });
   }
 };
