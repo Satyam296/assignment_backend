@@ -37,15 +37,17 @@ export const createOrder = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // Find the variant in the JSON field
-    const variants = product.variants || [];
-    const variantIndex = variants.findIndex((v: any) => v.id === orderData.variantId);
+    // Find the variant in the variants table
+    const { data: variant, error: variantError } = await supabase
+      .from('variants')
+      .select('*')
+      .eq('id', orderData.variantId)
+      .eq('product_id', orderData.productId)
+      .single();
     
-    if (variantIndex === -1) {
+    if (variantError || !variant) {
       return res.status(404).json({ error: "Variant not found" });
     }
-
-    const variant = variants[variantIndex];
 
     // Check if variant has stock
     if ((variant.stock || 0) === 0) {
@@ -54,22 +56,20 @@ export const createOrder = async (req: Request, res: Response) => {
 
     const oldStock = variant.stock || 0;
 
-    // Decrement stock
-    variants[variantIndex] = {
-      ...variant,
-      stock: (variant.stock || 0) - 1
-    };
-
-    // Update product with new stock
+    // Decrement stock in the variants table
     const { error: updateError } = await supabase
-      .from('products')
-      .update({ variants: variants })
-      .eq('id', orderData.productId);
+      .from('variants')
+      .update({ stock: (variant.stock || 0) - 1 })
+      .eq('id', orderData.variantId);
 
     if (updateError) {
       console.error('Error updating stock:', updateError);
       throw updateError;
     }
+
+    // Calculate expected delivery date (7 days from now)
+    const expectedDeliveryDate = new Date();
+    expectedDeliveryDate.setDate(expectedDeliveryDate.getDate() + 7);
 
     // Create order
     const { data: order, error: orderError } = await supabase
@@ -86,7 +86,7 @@ export const createOrder = async (req: Request, res: Response) => {
         monthly_payment: orderData.monthlyPayment,
         interest_rate: orderData.interestRate || 0,
         cashback: orderData.cashback || 0,
-        total_amount: orderData.emiTenure * orderData.monthlyPayment,
+        expected_delivery_date: expectedDeliveryDate.toISOString(),
       }])
       .select()
       .single();
@@ -96,23 +96,30 @@ export const createOrder = async (req: Request, res: Response) => {
       throw orderError;
     }
 
-    // Check for low stock alerts
-    const newStock = variants[variantIndex].stock;
-    const { data: admins } = await supabase
-      .from('admins')
-      .select('*')
-      .eq('notification_enabled', true);
+    // Check for low stock alerts (simplified - just check if stock is low)
+    const newStock = (variant.stock || 0) - 1;
+    const LOW_STOCK_THRESHOLD = 5;
     
-    if (admins && admins.length > 0) {
-      for (const admin of admins) {
-        if (newStock < admin.low_stock_threshold && newStock >= 0) {
-          await sendLowStockAlert(
-            admin.email,
-            product.name,
-            variant.name,
-            newStock,
-            admin.low_stock_threshold
-          );
+    if (newStock <= LOW_STOCK_THRESHOLD && newStock >= 0) {
+      // Get all admins
+      const { data: admins } = await supabase
+        .from('admins')
+        .select('email');
+      
+      if (admins && admins.length > 0) {
+        for (const admin of admins) {
+          try {
+            await sendLowStockAlert(
+              admin.email,
+              product.name,
+              variant.name || `${variant.color} ${variant.storage}GB`,
+              newStock,
+              LOW_STOCK_THRESHOLD
+            );
+          } catch (emailError) {
+            console.error('Error sending low stock alert:', emailError);
+            // Don't fail the order if email fails
+          }
         }
       }
     }

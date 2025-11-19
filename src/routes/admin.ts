@@ -1,14 +1,16 @@
 import { Router } from "express";
-import { adminLogin, createAdmin, getInventory, getLowStock } from "../controllers/adminControllerSupabase";
+import { createAdmin, getInventory, getLowStockItems, getAllOrders } from "../controllers/adminController";
 
 const router = Router();
 
-// Admin authentication
-router.post("/login", adminLogin);
+// Admin management
 router.post("/admins", createAdmin);
 
 // Inventory management
 router.get("/inventory", getInventory);
-router.get("/inventory/low-stock", getLowStock);
+router.get("/inventory/low-stock", getLowStockItems);
+
+// Orders management
+router.get("/orders", getAllOrders);
 
 export default router;

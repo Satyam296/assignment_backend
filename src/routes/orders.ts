@@ -1,9 +1,9 @@
 import { Router } from "express";
-import { createOrder, getOrders } from "../controllers/orderControllerSupabase";
+import { createOrder, getAllOrders } from "../controllers/orderController";
 
 const router = Router();
 
 router.post("/", createOrder);
-router.get("/", getOrders);
+router.get("/", getAllOrders);
 
 export default router;

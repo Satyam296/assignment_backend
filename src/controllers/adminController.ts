@@ -2,18 +2,46 @@ import { Request, Response } from "express";
 import { supabase } from "../config/supabase";
 import { sendLowStockAlert, sendTestEmail } from "../services/emailService";
 
+// Get all orders
+export const getAllOrders = async (req: Request, res: Response) => {
+  try {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    
+    res.json(orders || []);
+  } catch (error: any) {
+    console.error("Error fetching orders:", error);
+    res.status(500).json({ error: "Failed to fetch orders", details: error.message });
+  }
+};
+
 // Get all products with inventory status
 export const getInventory = async (req: Request, res: Response) => {
   try {
-    const { data: products, error } = await supabase
+    // Fetch all products
+    const { data: products, error: productsError } = await supabase
       .from('products')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (productsError) throw productsError;
+
+    // Fetch all variants
+    const { data: allVariants, error: variantsError } = await supabase
+      .from('variants')
       .select('*');
     
-    if (error) throw error;
+    if (variantsError) throw variantsError;
 
     // Calculate inventory summary
     const inventorySummary = (products || []).map((product: any) => {
-      const variants = (product.variants || []).map((variant: any) => ({
+      const productVariants = (allVariants || []).filter((v: any) => v.product_id === product.id);
+      
+      const variants = productVariants.map((variant: any) => ({
         id: variant.id,
         name: variant.name,
         color: variant.color,
@@ -53,54 +81,55 @@ export const updateStock = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const { data: product, error: productError } = await supabase
-      .from('products')
+    // Get the variant from the variants table
+    const { data: variant, error: variantError } = await supabase
+      .from('variants')
       .select('*')
-      .eq('id', productId)
+      .eq('id', variantId)
+      .eq('product_id', productId)
       .single();
 
-    if (productError || !product) {
-      return res.status(404).json({ error: "Product not found" });
-    }
-
-    // Find and update the variant
-    const variants = product.variants || [];
-    const variantIndex = variants.findIndex((v: any) => v.id === variantId);
-    
-    if (variantIndex === -1) {
+    if (variantError || !variant) {
       return res.status(404).json({ error: "Variant not found" });
     }
 
-    const oldStock = variants[variantIndex].stock || 0;
-    variants[variantIndex] = {
-      ...variants[variantIndex],
-      stock: newStock
-    };
+    const oldStock = variant.stock || 0;
 
-    // Update product
+    // Update the variant stock in the variants table
     const { error: updateError } = await supabase
-      .from('products')
-      .update({ variants: variants })
-      .eq('id', productId);
+      .from('variants')
+      .update({ stock: newStock })
+      .eq('id', variantId);
 
     if (updateError) throw updateError;
 
+    // Get product name for alert
+    const { data: product } = await supabase
+      .from('products')
+      .select('name')
+      .eq('id', productId)
+      .single();
+
     // Check if stock dropped below threshold and send alert
-    const { data: admins } = await supabase
-      .from('admins')
-      .select('*')
-      .eq('notification_enabled', true);
-    
-    if (admins && admins.length > 0) {
-      for (const admin of admins) {
-        if (oldStock >= admin.low_stock_threshold && newStock < admin.low_stock_threshold) {
-          await sendLowStockAlert(
-            admin.email,
-            product.name,
-            variants[variantIndex].name,
-            newStock,
-            admin.low_stock_threshold
-          );
+    const LOW_STOCK_THRESHOLD = 5;
+    if (oldStock >= LOW_STOCK_THRESHOLD && newStock < LOW_STOCK_THRESHOLD) {
+      const { data: admins } = await supabase
+        .from('admins')
+        .select('email');
+      
+      if (admins && admins.length > 0) {
+        for (const admin of admins) {
+          try {
+            await sendLowStockAlert(
+              admin.email,
+              product?.name || 'Unknown Product',
+              variant.name || `${variant.color} ${variant.storage}GB`,
+              newStock,
+              LOW_STOCK_THRESHOLD
+            );
+          } catch (emailError) {
+            console.error('Error sending low stock alert:', emailError);
+          }
         }
       }
     }
@@ -108,9 +137,9 @@ export const updateStock = async (req: Request, res: Response) => {
     res.json({ 
       message: "Stock updated successfully", 
       variant: {
-        id: variants[variantIndex].id,
-        name: variants[variantIndex].name,
-        stock: variants[variantIndex].stock,
+        id: variant.id,
+        name: variant.name,
+        stock: newStock,
       }
     });
   } catch (error: any) {
@@ -123,38 +152,38 @@ export const updateStock = async (req: Request, res: Response) => {
 export const getLowStockItems = async (req: Request, res: Response) => {
   try {
     const threshold = parseInt(req.query.threshold as string) || 5;
-    const { data: products, error } = await supabase
+    
+    // Fetch all products
+    const { data: products, error: productsError } = await supabase
       .from('products')
       .select('*');
     
-    if (error) throw error;
+    if (productsError) throw productsError;
 
-    const lowStockItems: any[] = [];
+    // Fetch all variants with low stock
+    const { data: variants, error: variantsError } = await supabase
+      .from('variants')
+      .select('*')
+      .lt('stock', threshold);
+    
+    if (variantsError) throw variantsError;
 
-    (products || []).forEach((product: any) => {
-      const variants = product.variants || [];
-      variants.forEach((variant: any) => {
-        if ((variant.stock || 0) < threshold) {
-          lowStockItems.push({
-            productId: product.id,
-            productName: product.name,
-            productSlug: product.slug,
-            variantId: variant.id,
-            variantName: variant.name,
-            color: variant.color,
-            storage: variant.storage,
-            currentStock: variant.stock || 0,
-            price: variant.price,
-          });
-        }
-      });
+    const lowStockItems = (variants || []).map((variant: any) => {
+      const product = products?.find((p: any) => p.id === variant.product_id);
+      return {
+        productId: product?.id,
+        productName: product?.name,
+        productSlug: product?.slug,
+        variantId: variant.id,
+        variantName: variant.name,
+        color: variant.color,
+        storage: variant.storage,
+        currentStock: variant.stock || 0,
+        price: variant.price,
+      };
     });
 
-    res.json({ 
-      threshold,
-      count: lowStockItems.length,
-      items: lowStockItems 
-    });
+    res.json(lowStockItems);
   } catch (error: any) {
     console.error('Error fetching low stock items:', error);
     res.status(500).json({ error: "Failed to fetch low stock items", details: error.message });

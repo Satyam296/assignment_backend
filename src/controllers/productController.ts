@@ -3,12 +3,29 @@ import { supabase } from "../config/supabase";
 
 export const getAllProducts = async (req: Request, res: Response) => {
   try {
-    const { data, error } = await supabase
+    // Fetch all products
+    const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('*');
+      .select('*')
+      .order('created_at', { ascending: false });
     
-    if (error) throw error;
-    res.json(data);
+    if (productsError) throw productsError;
+    
+    // Fetch variants for all products
+    const { data: variants, error: variantsError } = await supabase
+      .from('variants')
+      .select('*')
+      .order('created_at', { ascending: true });
+    
+    if (variantsError) throw variantsError;
+    
+    // Combine products with their variants
+    const productsWithVariants = products?.map(product => ({
+      ...product,
+      variants: variants?.filter(v => v.product_id === product.id) || []
+    })) || [];
+    
+    res.json(productsWithVariants);
   } catch (error: any) {
     res.status(500).json({ error: "Failed to fetch products", details: error.message });
   }
@@ -17,19 +34,61 @@ export const getAllProducts = async (req: Request, res: Response) => {
 export const getProductBySlug = async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
-    const { data, error } = await supabase
+    
+    // Fetch product
+    const { data: product, error: productError } = await supabase
       .from('products')
       .select('*')
       .eq('slug', slug)
       .single();
 
-    if (error) throw error;
+    if (productError) throw productError;
     
-    if (!data) {
+    if (!product) {
       return res.status(404).json({ error: "Product not found" });
     }
+    
+    // Fetch variants
+    const { data: variants, error: variantsError } = await supabase
+      .from('variants')
+      .select('*')
+      .eq('product_id', product.id)
+      .order('created_at', { ascending: true });
+    
+    if (variantsError) throw variantsError;
+    
+    // Fetch EMI plans
+    const { data: emiPlans, error: emiError } = await supabase
+      .from('emi_plans')
+      .select('*')
+      .eq('product_id', product.id)
+      .order('tenure', { ascending: true });
+    
+    if (emiError) throw emiError;
+    
+    // Fetch specifications
+    const { data: specifications, error: specsError } = await supabase
+      .from('specifications')
+      .select('*')
+      .eq('product_id', product.id);
+    
+    if (specsError) throw specsError;
+    
+    // Combine all data
+    const productWithDetails = {
+      ...product,
+      variants: variants || [],
+      emiPlans: emiPlans?.map(plan => ({
+        id: plan.plan_id,
+        tenure: plan.tenure,
+        interestRate: plan.interest_rate,
+        cashback: plan.cashback || 0,
+        mutualFundName: plan.mutual_fund || ''
+      })) || [],
+      specifications: specifications || []
+    };
 
-    res.json(data);
+    res.json(productWithDetails);
   } catch (error: any) {
     res.status(500).json({ error: "Failed to fetch product", details: error.message });
   }
@@ -38,29 +97,104 @@ export const getProductBySlug = async (req: Request, res: Response) => {
 // Create new product
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    const productData = req.body;
+    const { name, slug, category, description, variants, emiPlans, specifications } = req.body;
     
     // Validate required fields
-    if (!productData.name || !productData.slug || !productData.category) {
+    if (!name || !slug || !category) {
       return res.status(400).json({ error: "Missing required fields: name, slug, category" });
     }
     
     // Check if slug already exists
-    const existingProduct = await Product.findOne({ slug: productData.slug });
+    const { data: existingProduct } = await supabase
+      .from('products')
+      .select('id')
+      .eq('slug', slug)
+      .single();
+      
     if (existingProduct) {
       return res.status(400).json({ error: "Product with this slug already exists" });
     }
     
-    const product = new Product(productData);
-    await product.save();
+    // Create product
+    const { data: product, error: productError } = await supabase
+      .from('products')
+      .insert([{ name, slug, category, description }])
+      .select()
+      .single();
+      
+    if (productError) throw productError;
+    
+    // Create variants if provided
+    if (variants && variants.length > 0) {
+      const variantsToInsert = variants.map((v: any) => ({
+        product_id: product.id,
+        name: v.name,
+        color: v.color,
+        storage: v.storage,
+        price: v.price,
+        mrp: v.mrp,
+        image: v.image,
+        images: v.images || [],
+        stock: v.stock || 0,
+        available_emi_plans: v.availableEmiPlans || []
+      }));
+      
+      const { error: variantsError } = await supabase
+        .from('variants')
+        .insert(variantsToInsert);
+      
+      if (variantsError) {
+        console.error('Error inserting variants:', variantsError);
+        throw variantsError;
+      }
+    }
+    
+    // Create EMI plans if provided
+    if (emiPlans && emiPlans.length > 0) {
+      const emiPlansToInsert = emiPlans.map((plan: any) => ({
+        product_id: product.id,
+        plan_id: plan.id,
+        tenure: plan.tenure,
+        interest_rate: plan.interestRate || 0,
+        cashback: plan.cashback || 0,
+        mutual_fund: plan.mutualFundName || ''
+      }));
+      
+      const { error: emiError } = await supabase
+        .from('emi_plans')
+        .insert(emiPlansToInsert);
+      
+      if (emiError) {
+        console.error('Error inserting EMI plans:', emiError);
+        throw emiError;
+      }
+    }
+    
+    // Create specifications if provided
+    if (specifications && specifications.length > 0) {
+      const specsToInsert = specifications.map((spec: any) => ({
+        product_id: product.id,
+        key: spec.key,
+        value: spec.value
+      }));
+      
+      const { error: specsError } = await supabase
+        .from('specifications')
+        .insert(specsToInsert);
+      
+      if (specsError) {
+        console.error('Error inserting specifications:', specsError);
+        throw specsError;
+      }
+    }
     
     res.status(201).json({
       message: "Product created successfully",
       product,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating product:", error);
-    res.status(500).json({ error: "Failed to create product" });
+    res.status(500).json({ error: "Failed to create product", details: error.message });
   }
 };
 
@@ -70,11 +204,14 @@ export const updateProduct = async (req: Request, res: Response) => {
     const { id } = req.params;
     const productData = req.body;
     
-    const product = await Product.findByIdAndUpdate(
-      id,
-      productData,
-      { new: true, runValidators: true }
-    );
+    const { data: product, error } = await supabase
+      .from('products')
+      .update(productData)
+      .eq('id', id)
+      .select()
+      .single();
+      
+    if (error) throw error;
     
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
@@ -84,9 +221,9 @@ export const updateProduct = async (req: Request, res: Response) => {
       message: "Product updated successfully",
       product,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error updating product:", error);
-    res.status(500).json({ error: "Failed to update product" });
+    res.status(500).json({ error: "Failed to update product", details: error.message });
   }
 };
 
@@ -95,7 +232,14 @@ export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
-    const product = await Product.findByIdAndDelete(id);
+    const { data: product, error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', id)
+      .select()
+      .single();
+      
+    if (error) throw error;
     
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
@@ -105,8 +249,8 @@ export const deleteProduct = async (req: Request, res: Response) => {
       message: "Product deleted successfully",
       product,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error deleting product:", error);
-    res.status(500).json({ error: "Failed to delete product" });
+    res.status(500).json({ error: "Failed to delete product", details: error.message });
   }
 };

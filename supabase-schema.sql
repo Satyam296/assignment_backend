@@ -64,6 +64,7 @@ CREATE TABLE orders (
   interest_rate DECIMAL(5, 2) NOT NULL,
   cashback DECIMAL(10, 2) DEFAULT 0,
   status VARCHAR(50) DEFAULT 'pending',
+  expected_delivery_date TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW()
 );
 

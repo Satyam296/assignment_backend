@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { getProducts, createProduct, updateProduct, deleteProduct } from "../controllers/productControllerSupabase";
+import { getAllProducts, getProductBySlug, createProduct, updateProduct, deleteProduct } from "../controllers/productController";
 
 const router = Router();
 
 // Get all products (includes slug filtering in controller)
-router.get("/", getProducts);
-router.get("/:slug", getProducts); // Same endpoint handles slug filtering
+router.get("/", getAllProducts);
+router.get("/:slug", getProductBySlug); // Get product by slug
 router.post("/", createProduct);
 router.put("/:id", updateProduct);
 router.delete("/:id", deleteProduct);
