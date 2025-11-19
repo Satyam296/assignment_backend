@@ -261,30 +261,47 @@ export const updateProduct = async (req: Request, res: Response) => {
     
     console.log('All existing data deleted successfully');
     
-    // Insert updated variants
+    // Handle variants - UPDATE existing ones by ID, INSERT new ones
     if (variants && variants.length > 0) {
-      const variantsToInsert = variants.map((v: any) => ({
-        product_id: id,
-        name: v.name || `${v.color} ${v.storage}`,
-        color: v.color || '',
-        storage: v.storage || '',
-        price: parseFloat(v.price) || 0,
-        mrp: parseFloat(v.mrp) || 0,
-        image: v.image || '',
-        images: Array.isArray(v.images) ? v.images : [],
-        stock: parseInt(v.stock) || 0,
-        available_emi_plans: Array.isArray(v.availableEmiPlans) ? v.availableEmiPlans : []
-      }));
-      
-      console.log('Inserting variants:', variantsToInsert);
-      
-      const { error: variantsError } = await supabase
-        .from('variants')
-        .insert(variantsToInsert);
-      
-      if (variantsError) {
-        console.error('Variants insert error:', variantsError);
-        throw variantsError;
+      for (const v of variants) {
+        const variantData = {
+          product_id: id,
+          name: v.name || `${v.color} ${v.storage}`,
+          color: v.color || '',
+          storage: v.storage || '',
+          price: parseFloat(v.price) || 0,
+          mrp: parseFloat(v.mrp) || 0,
+          image: v.image || '',
+          images: Array.isArray(v.images) ? v.images : [],
+          stock: parseInt(v.stock) || 0,
+          available_emi_plans: Array.isArray(v.availableEmiPlans) ? v.availableEmiPlans : []
+        };
+
+        if (v.id && v.id.toString().length > 10) {
+          // Update existing variant by ID
+          console.log('Updating variant:', v.id);
+          const { error: updateError } = await supabase
+            .from('variants')
+            .update(variantData)
+            .eq('id', v.id)
+            .eq('product_id', id);
+          
+          if (updateError) {
+            console.error('Variant update error:', updateError);
+            throw new Error(`Failed to update variant: ${updateError.message}`);
+          }
+        } else {
+          // Insert new variant
+          console.log('Inserting new variant:', v.color, v.storage);
+          const { error: insertError } = await supabase
+            .from('variants')
+            .insert([variantData]);
+          
+          if (insertError) {
+            console.error('Variant insert error:', insertError);
+            throw new Error(`Failed to insert variant: ${insertError.message}`);
+          }
+        }
       }
     }
     
