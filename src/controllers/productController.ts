@@ -202,20 +202,118 @@ export const createProduct = async (req: Request, res: Response) => {
 export const updateProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const productData = req.body;
+    const { name, slug, category, description, variants, emiPlans, specifications } = req.body;
     
-    const { data: product, error } = await supabase
+    console.log('Updating product:', id);
+    console.log('Variants to update:', variants?.length || 0);
+    console.log('EMI plans to update:', emiPlans?.length || 0);
+    
+    // Update product basic info
+    const { data: product, error: productError } = await supabase
       .from('products')
-      .update(productData)
+      .update({ name, slug, category, description })
       .eq('id', id)
       .select()
       .single();
       
-    if (error) throw error;
+    if (productError) {
+      console.error('Product update error:', productError);
+      throw productError;
+    }
     
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
     }
+    
+    // Delete existing variants, EMI plans, and specifications
+    const { error: deleteVariantsError } = await supabase.from('variants').delete().eq('product_id', id);
+    if (deleteVariantsError) console.error('Delete variants error:', deleteVariantsError);
+    
+    const { error: deleteEmiError } = await supabase.from('emi_plans').delete().eq('product_id', id);
+    if (deleteEmiError) console.error('Delete EMI plans error:', deleteEmiError);
+    
+    const { error: deleteSpecsError } = await supabase.from('specifications').delete().eq('product_id', id);
+    if (deleteSpecsError) console.error('Delete specifications error:', deleteSpecsError);
+    
+    // Insert updated variants
+    if (variants && variants.length > 0) {
+      const variantsToInsert = variants.map((v: any) => ({
+        product_id: id,
+        name: v.name || `${v.color} ${v.storage}`,
+        color: v.color || '',
+        storage: v.storage || '',
+        price: parseFloat(v.price) || 0,
+        mrp: parseFloat(v.mrp) || 0,
+        image: v.image || '',
+        images: Array.isArray(v.images) ? v.images : [],
+        stock: parseInt(v.stock) || 0,
+        available_emi_plans: Array.isArray(v.availableEmiPlans) ? v.availableEmiPlans : []
+      }));
+      
+      console.log('Inserting variants:', variantsToInsert);
+      
+      const { error: variantsError } = await supabase
+        .from('variants')
+        .insert(variantsToInsert);
+      
+      if (variantsError) {
+        console.error('Variants insert error:', variantsError);
+        throw variantsError;
+      }
+    }
+    
+    // Insert updated EMI plans
+    if (emiPlans && emiPlans.length > 0) {
+      const emiPlansToInsert = emiPlans.map((plan: any) => {
+        const planData = {
+          product_id: id,
+          plan_id: String(plan.id || plan.plan_id || `plan_${Date.now()}`),
+          tenure: parseInt(plan.tenure) || 0,
+          interest_rate: parseFloat(plan.interestRate || plan.interest_rate) || 0,
+          cashback: parseFloat(plan.cashback) || 0,
+          mutual_fund: String(plan.mutualFundName || plan.mutual_fund || '')
+        };
+        console.log('EMI plan to insert:', planData);
+        return planData;
+      });
+      
+      console.log('Inserting EMI plans:', emiPlansToInsert);
+      
+      const { error: emiError } = await supabase
+        .from('emi_plans')
+        .insert(emiPlansToInsert);
+      
+      if (emiError) {
+        console.error('EMI plans insert error:', emiError);
+        console.error('EMI plans that failed:', JSON.stringify(emiPlansToInsert, null, 2));
+        throw new Error(`Failed to insert EMI plans: ${emiError.message}`);
+      }
+    }
+    
+    // Insert updated specifications
+    if (specifications && specifications.length > 0) {
+      const validSpecs = specifications.filter((spec: any) => spec.key && spec.value);
+      if (validSpecs.length > 0) {
+        const specsToInsert = validSpecs.map((spec: any) => ({
+          product_id: id,
+          key: spec.key,
+          value: spec.value
+        }));
+        
+        console.log('Inserting specifications:', specsToInsert);
+        
+        const { error: specsError } = await supabase
+          .from('specifications')
+          .insert(specsToInsert);
+        
+        if (specsError) {
+          console.error('Specifications insert error:', specsError);
+          throw specsError;
+        }
+      }
+    }
+    
+    console.log('Product updated successfully');
     
     res.json({
       message: "Product updated successfully",
@@ -232,6 +330,23 @@ export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
+    // First check if product exists
+    const { data: existingProduct, error: checkError } = await supabase
+      .from('products')
+      .select('id')
+      .eq('id', id)
+      .single();
+    
+    if (checkError || !existingProduct) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    
+    // Delete related records first (cascading delete)
+    await supabase.from('variants').delete().eq('product_id', id);
+    await supabase.from('emi_plans').delete().eq('product_id', id);
+    await supabase.from('specifications').delete().eq('product_id', id);
+    
+    // Now delete the product
     const { data: product, error } = await supabase
       .from('products')
       .delete()
@@ -240,10 +355,6 @@ export const deleteProduct = async (req: Request, res: Response) => {
       .single();
       
     if (error) throw error;
-    
-    if (!product) {
-      return res.status(404).json({ error: "Product not found" });
-    }
     
     res.json({
       message: "Product deleted successfully",
