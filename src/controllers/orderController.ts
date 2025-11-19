@@ -93,7 +93,13 @@ export const createOrder = async (req: Request, res: Response) => {
 
     if (orderError) {
       console.error('Error creating order:', orderError);
-      throw orderError;
+      console.error('Order error details:', JSON.stringify(orderError, null, 2));
+      return res.status(500).json({ 
+        error: "Failed to create order", 
+        details: orderError.message,
+        code: orderError.code,
+        hint: orderError.hint
+      });
     }
 
     // Check for low stock alerts (simplified - just check if stock is low)
