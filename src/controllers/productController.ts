@@ -22,7 +22,20 @@ export const getAllProducts = async (req: Request, res: Response) => {
     // Combine products with their variants
     const productsWithVariants = products?.map(product => ({
       ...product,
-      variants: variants?.filter(v => v.product_id === product.id) || []
+      variants: variants
+        ?.filter(v => v.product_id === product.id)
+        .map(v => ({
+          id: v.id,
+          name: v.name,
+          color: v.color,
+          storage: v.storage,
+          price: v.price,
+          mrp: v.mrp,
+          image: v.image,
+          images: v.images,
+          stock: v.stock,
+          availableEmiPlans: v.available_emi_plans || []
+        })) || []
     })) || [];
     
     res.json(productsWithVariants);
@@ -77,7 +90,18 @@ export const getProductBySlug = async (req: Request, res: Response) => {
     // Combine all data
     const productWithDetails = {
       ...product,
-      variants: variants || [],
+      variants: variants?.map(v => ({
+        id: v.id,
+        name: v.name,
+        color: v.color,
+        storage: v.storage,
+        price: v.price,
+        mrp: v.mrp,
+        image: v.image,
+        images: v.images,
+        stock: v.stock,
+        availableEmiPlans: v.available_emi_plans || []
+      })) || [],
       emiPlans: emiPlans?.map(plan => ({
         id: plan.plan_id,
         tenure: plan.tenure,
