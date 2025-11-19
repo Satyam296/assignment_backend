@@ -225,20 +225,9 @@ export const updateProduct = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Product not found" });
     }
     
-    console.log('Deleting existing related data for product:', id);
+    console.log('Updating related data for product:', id);
     
-    // Delete existing variants, EMI plans, and specifications - MUST complete before inserting new ones
-    const { error: deleteVariantsError, count: deletedVariants } = await supabase
-      .from('variants')
-      .delete()
-      .eq('product_id', id);
-    
-    if (deleteVariantsError) {
-      console.error('Delete variants error:', deleteVariantsError);
-      throw new Error(`Failed to delete variants: ${deleteVariantsError.message}`);
-    }
-    console.log(`Deleted ${deletedVariants || 0} existing variants`);
-    
+    // Delete existing EMI plans and specifications (these will be re-inserted)
     const { error: deleteEmiError } = await supabase
       .from('emi_plans')
       .delete()
@@ -259,10 +248,31 @@ export const updateProduct = async (req: Request, res: Response) => {
       throw new Error(`Failed to delete specifications: ${deleteSpecsError.message}`);
     }
     
-    console.log('All existing data deleted successfully');
+    console.log('EMI plans and specifications deleted successfully');
     
-    // Handle variants - UPDATE existing ones by ID, INSERT new ones
+    // Handle variants - UPDATE existing ones by ID, INSERT new ones, DELETE removed ones
     if (variants && variants.length > 0) {
+      // Get list of variant IDs that should remain
+      const incomingVariantIds = variants
+        .filter((v: any) => v.id && v.id.toString().length > 10)
+        .map((v: any) => v.id);
+      
+      // Delete variants that are no longer in the update
+      if (incomingVariantIds.length > 0) {
+        console.log('Keeping variant IDs:', incomingVariantIds);
+        const { error: deleteRemovedError } = await supabase
+          .from('variants')
+          .delete()
+          .eq('product_id', id)
+          .not('id', 'in', `(${incomingVariantIds.join(',')})`);
+        
+        if (deleteRemovedError) {
+          console.error('Delete removed variants error:', deleteRemovedError);
+          // Don't throw - this is not critical
+        }
+      }
+      
+      // Now update or insert each variant
       for (const v of variants) {
         const variantData = {
           product_id: id,
