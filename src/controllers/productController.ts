@@ -225,15 +225,41 @@ export const updateProduct = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Product not found" });
     }
     
-    // Delete existing variants, EMI plans, and specifications
-    const { error: deleteVariantsError } = await supabase.from('variants').delete().eq('product_id', id);
-    if (deleteVariantsError) console.error('Delete variants error:', deleteVariantsError);
+    console.log('Deleting existing related data for product:', id);
     
-    const { error: deleteEmiError } = await supabase.from('emi_plans').delete().eq('product_id', id);
-    if (deleteEmiError) console.error('Delete EMI plans error:', deleteEmiError);
+    // Delete existing variants, EMI plans, and specifications - MUST complete before inserting new ones
+    const { error: deleteVariantsError, count: deletedVariants } = await supabase
+      .from('variants')
+      .delete()
+      .eq('product_id', id);
     
-    const { error: deleteSpecsError } = await supabase.from('specifications').delete().eq('product_id', id);
-    if (deleteSpecsError) console.error('Delete specifications error:', deleteSpecsError);
+    if (deleteVariantsError) {
+      console.error('Delete variants error:', deleteVariantsError);
+      throw new Error(`Failed to delete variants: ${deleteVariantsError.message}`);
+    }
+    console.log(`Deleted ${deletedVariants || 0} existing variants`);
+    
+    const { error: deleteEmiError } = await supabase
+      .from('emi_plans')
+      .delete()
+      .eq('product_id', id);
+    
+    if (deleteEmiError) {
+      console.error('Delete EMI plans error:', deleteEmiError);
+      throw new Error(`Failed to delete EMI plans: ${deleteEmiError.message}`);
+    }
+    
+    const { error: deleteSpecsError } = await supabase
+      .from('specifications')
+      .delete()
+      .eq('product_id', id);
+    
+    if (deleteSpecsError) {
+      console.error('Delete specifications error:', deleteSpecsError);
+      throw new Error(`Failed to delete specifications: ${deleteSpecsError.message}`);
+    }
+    
+    console.log('All existing data deleted successfully');
     
     // Insert updated variants
     if (variants && variants.length > 0) {
